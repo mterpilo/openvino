@@ -98,7 +98,6 @@ void ExportTlvModel(uint32_t modelId,
     void* bufferStateRWData = nullptr;
     uint32_t sizeOfStateRWData = 0;
 
-#if 0
     // RW - state
     status = Gna2ModelExport(exportConfig,
         Gna2ModelExportComponentStateDump,
@@ -107,6 +106,7 @@ void ExportTlvModel(uint32_t modelId,
         bufferStateRWData = nullptr;
         sizeOfStateRWData = 0;
     }
+#if 0
 
     // RW - external Input
     void* bufferInputRWData;

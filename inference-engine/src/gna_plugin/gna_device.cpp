@@ -27,7 +27,12 @@
 #include "details/ie_exception.hpp"
 #include "gna_plugin_log.hpp"
 
+// DEBUG!!!
+#include "intel_gna_model_print.h"
+
 std::mutex GNADeviceHelper::acrossPluginsSync{};
+
+
 
 uint8_t* GNADeviceHelper::alloc(uint32_t size_requested, uint32_t *size_granted) {
     std::unique_lock<std::mutex> lockGnaCalls{ acrossPluginsSync };
@@ -37,6 +42,11 @@ uint8_t* GNADeviceHelper::alloc(uint32_t size_requested, uint32_t *size_granted)
 #else
     const auto status = Gna2MemoryAlloc(size_requested, size_granted, &memPtr);
     checkGna2Status(status, "Gna2MemoryAlloc");
+    debug_monitor_.alloc_callback(memPtr, *size_granted);
+    const uint32_t MemoryTagState = 7;
+    const auto status2 = Gna2MemorySetTag(memPtr, MemoryTagState);
+    checkGna2Status(status2, "Gna2MemorySetTag");
+
 #endif
     if (memPtr == nullptr) {
         THROW_GNA_EXCEPTION << "GNAAlloc failed to allocate memory. Requested: " << size_requested << " Granted: " << *(size_granted);
@@ -105,6 +115,9 @@ uint32_t GNADeviceHelper::propagate(const uint32_t requestConfigId, Gna2Accelera
         detectedGnaDevVersion == Gna2DeviceVersionSoftwareEmulation) {
         gnawarn() << "GNA Device not detected, consider using other mode of acceleration";
     }
+    // Debug !!!
+    debug_monitor_.dump_inputs_outputs("dumps/frame_" + std::to_string(frame_no_) + "_pre_", *monitored_model_);
+
     const auto status1 = Gna2RequestConfigSetAccelerationMode(requestConfigId, gna2AccelerationMode);
     checkGna2Status(status1, "Gna2RequestConfigSetAccelerationMode");
     const auto status2 = Gna2RequestEnqueue(requestConfigId, &reqId);
@@ -132,9 +145,17 @@ uint32_t GNADeviceHelper::createModel(Gna2Model& gnaModel) const {
     if (isUpTo20GnaHwDevice() && isGnaLibVersion2_1) {
         enforceLegacyCnns(gnaModel);
     }
+
     const auto status = Gna2ModelCreate(nGnaDeviceIndex, &gnaModel, &modelId);
 
     checkGna2Status(status, gnaModel);
+
+    // DEBUG !!!
+    monitored_model_ = &gnaModel;
+    PrintModel(std::cout, gnaModel);
+
+    debug_monitor_.analyze_inputs_outputs(std::cout, gnaModel);
+
     return modelId;
 }
 
@@ -342,6 +363,10 @@ const std::map <const std::pair<Gna2OperationType, int32_t>, const std::string> 
 
 GnaWaitStatus GNADeviceHelper::wait(uint32_t reqId, int64_t millisTimeout) {
     std::unique_lock<std::mutex> lockGnaCalls{ acrossPluginsSync };
+
+    debug_monitor_.dump_inputs_outputs("dumps/frame_" + std::to_string(frame_no_) + "_post_", *monitored_model_);
+    ++frame_no_;
+
 #if GNA_LIB_VER == 2
     const auto status = Gna2RequestWait(reqId, millisTimeout);
     if (status == Gna2StatusWarningDeviceBusy) {

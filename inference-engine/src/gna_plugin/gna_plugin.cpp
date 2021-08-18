@@ -77,6 +77,10 @@ uint32_t ToByteSize(const Gna2DataType type) {
     }
 }
 
+static std::ofstream input_dump_file("input_frames.bin", std::ios::binary);
+static std::ofstream output_dump_file("output_frames.bin", std::ios::binary);
+static int sample_no = 0;
+
 constexpr uint32_t GNAPluginNS::GNAPlugin::FAKE_REQUEST_CONFIG_ID;
 #endif
 using namespace InferenceEngine;
@@ -108,10 +112,12 @@ void GNAPlugin::copyInputData(T *dst,
             for (uint32_t j = 0; j < num_vector_elements; j++) {
                 if (!std::is_same<T, U>::value) {
                     dst[j * num_group + i] = GNAPluginNS::ConvertFloatToInt16(src[i * num_vector_elements + j] * scaleFactor);
+
                 } else {
                     dst[j * num_group + i] = src[i * num_vector_elements + j];
                 }
             }
+
             // pad to meet weight matrix row length requirement
             for (uint32_t j = num_vector_elements; j < num_vector_stride; j++) {
                 dst[j * num_group + i] = 0;
@@ -234,6 +240,9 @@ void GNAPlugin::ExportScores(void *ptr_dst,
                     dst[i * num_vector_elements + j] = 0;
                 }
             }
+
+            output_dump_file.write(reinterpret_cast<const char*>(ptr_src), num_bytes_per_element_input * num_vector_elements);
+
         } else {
             THROW_GNA_EXCEPTION << "Unsupported target precision for infer : " << num_bytes_per_element << "bytes";
         }
@@ -289,6 +298,11 @@ void GNAPlugin::ImportFrames(
                 auto dst = reinterpret_cast<int16_t *>(ptr_dst);
                 auto src = reinterpret_cast<const float *>(ptr_src);
                 copyInputData(dst, src, num_frames, num_group, num_vector_elements, num_vector_stride, orientation, scaleFactor);
+
+                // Debug!!!
+                input_dump_file.write((char*)dst, num_vector_elements * sizeof(*dst));
+                input_dump_file.flush();
+
             }
         }
     } else {
@@ -1052,7 +1066,7 @@ void GNAPlugin::DumpXNNToFile() const {
         return;
     }
 
-    const auto versionInt = GetDeviceVersionFromString(config.dumpXNNGeneration);
+    const auto versionInt = Gna2DeviceVersionEmbedded3_1;// GetDeviceVersionFromString(config.dumpXNNGeneration);
 
     if (!gnadevice) {
         THROW_GNA_EXCEPTION << "Cannot generate XNNDump for float network";
@@ -1076,15 +1090,15 @@ void GNAPlugin::DumpXNNToFile() const {
         dump.header.OutputScalingFactor = outputsDesc.front().scale_factor;
         dumpStream.write(reinterpret_cast<char*>(&dump.header), sizeof(Gna2ModelSueCreekHeader));
         dumpStream.write(reinterpret_cast<char*>(dump.model.get()), dump.header.ModelSize);
-    } else if (versionInt == Gna2DeviceVersionEmbedded3_0) {
+    } else if (versionInt == Gna2DeviceVersionEmbedded3_1) {
         uint32_t input_size = 0;
         uint32_t output_size = 0;
-        for (auto i : inputsDesc->bytes_allocated_for_input) 
+        for (auto i : inputsDesc->bytes_allocated_for_input)
             input_size += i.second;
         for (auto o : outputsDesc)
             output_size += o.num_bytes_per_element* o.num_elements;
 
-        gnadevice->dumpTLVForDeviceVersion(modelId, dumpStream, Gna2DeviceVersionEmbedded3_0,
+        gnadevice->dumpTLVForDeviceVersion(modelId, dumpStream, Gna2DeviceVersionEmbedded3_1,
             input_size, output_size);
     } else {
         static_assert(sizeof(versionInt) >= sizeof(Gna2DeviceVersion), "");
